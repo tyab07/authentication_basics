@@ -2,7 +2,7 @@ import User from "../models/userSchema.js";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-
+import Session from "../models/sessionSchema.js";
 dotenv.config({path:"./config/config.env"  });
 
 
@@ -21,8 +21,18 @@ export const registerUser = async (req, res) => {
 
         await newUser.save();
 
-        const accessToken = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "1m" });   
-        const refreshToken = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "7d" });  
+
+        const refreshToken = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+        const session = new Session({
+            user: newUser._id,
+            refreshTokenHash: crypto.createHash("sha256").update(refreshToken).digest("hex"),
+            ip: req.ip,
+            userAgent: req.headers["user-agent"] || "Unknown"   
+        });
+        await session.save();
+
+
+        const accessToken = jwt.sign({ userId: newUser._id, sessionId: session._id },process.env.JWT_SECRET, { expiresIn: "1m" });   
          
 
         res.cookie("refreshToken", refreshToken, {
