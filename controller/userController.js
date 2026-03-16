@@ -21,15 +21,22 @@ export const registerUser = async (req, res) => {
 
         await newUser.save();
 
-        const AccessToken = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "1m" });   
+        const accessToken = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "1m" });   
+        const refreshToken = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: "7d" });  
+         
 
-
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure:true,
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000, 
+        });     
         res.status(201).json({ message: "User registered successfully",
             user: {
                 username: newUser.username,
                 email: newUser.email,   
-
-                 }, token });
+ 
+                 }, accessToken,});
 
     }
      catch (error) {
@@ -63,3 +70,30 @@ export async function getMe(req, res) {
 
 }
 
+
+export async function refreshToken(req, res) {
+    const rToken = req.cookies.refreshToken;
+
+    if (!rToken) {
+        return res.status(401).json({ message: "Unauthorized" });
+    }
+    
+    try {
+        const decoded = jwt.verify(rToken, process.env.JWT_SECRET);
+        const user = await User.findById(decoded.userId);  
+        if(!user){
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+
+        const accessToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "10m" });
+
+        res.status(200).json({ 
+            message: "Token is genarated Successfully",
+            accessToken 
+         });
+
+    } catch (error) {
+        console.error("Error refreshing token:", error);
+        res.status(401).json({ message: "Invalid token" });
+    }
+}
