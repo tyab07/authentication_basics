@@ -55,6 +55,41 @@ export const registerUser = async (req, res) => {
     }
 }   
 
+export async function loginUser(req, res) {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+        return res.status(401).json({ message: "Invalid email or password" });
+    }
+    const hashedPassword = crypto.createHash("sha256").update(password).digest("hex");
+    const isPasswordValid = hashedPassword === user.password;
+    
+    if (!isPasswordValid) {
+        return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    const refreshToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" });
+    
+    const session = new Session({
+        user: user._id,
+        refreshTokenHash: crypto.createHash("sha256").update(refreshToken).digest("hex"),
+        ip: req.ip,
+        userAgent: req.headers["user-agent"] || "Unknown"   
+    });
+    await session.save();
+
+    const accessToken = jwt.sign({ userId: user._id, sessionId: session._id }, process.env.JWT_SECRET, { expiresIn: "1m" });
+
+    res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure:true, 
+        maxAge: 7 * 24 * 60 * 60 * 1000, 
+    });     
+    res.status(200).json({ message: "Login successful", accessToken });     
+
+}
 export async function getMe(req, res) {
     
     const token  = req.headers.authorization?.split(" ")[1];
@@ -94,8 +129,20 @@ export async function refreshToken(req, res) {
         if(!user){
             return res.status(401).json({ message: "Unauthorized" });
         }
+        const refreshTokenHash = crypto.createHash("sha256").update(rToken).digest("hex");
+        
+        const session = await Session.findOne({
+            refreshTokenHash,
+            revoked:false
 
-        const accessToken = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: "10m" });
+        })
+
+        if(!session)
+        {
+            return res.status(401).json({message: "Unauthorized" });
+        }
+
+        const accessToken = jwt.sign({ userId: user._id,sessionId:session }, process.env.JWT_SECRET, { expiresIn: "10m" });
 
         res.status(200).json({ 
             message: "Token is genarated Successfully",
@@ -106,4 +153,29 @@ export async function refreshToken(req, res) {
         console.error("Error refreshing token:", error);
         res.status(401).json({ message: "Invalid token" });
     }
+}
+
+
+export async function logout(req, res) {
+    const refToken = req.cookies.refreshToken;
+
+    if (!refToken) {
+        return res.status(401).json({ message: "Unauthorized refreshToken" });
+    }
+
+    const refreshTokenHash = crypto.createHash("sha256").update(refToken).digest("hex");
+
+    const session = await Session.findOne({ refreshTokenHash, revoked: false });
+     
+    if(!session){
+      return res.status(401).json({ message: "Unauthorized session" });  
+    }
+
+    session.revoked = true;
+    await session.save();
+     
+    res.clearCookie("refreshToken")
+    res.status(200).json({ message: "Logged out successfully" });   
+
+    
 }
